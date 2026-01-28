@@ -32,7 +32,7 @@ I Am An Auto-Forward Bot. I Forward Files From Source Channels To Target Channel
 """
 
 ABOUT_TEXT = """<b><blockquote>╭────[ ᴍʏ ᴅᴇᴛᴀɪʟs ]────⍟</blockquote>
-<blockquote>├⍟ 🎭 Mʏ Nᴀᴍᴇ : <a href='https://t.me/AV_Autosfilterz_bot'>ᴀᴠ ғᴏʀᴡᴀʀᴅ ʙᴏᴛ</a></blockquote>
+<blockquote>├⍟ 🎭 Mʏ Nᴀᴍᴇ : <a href='https://t.me/AV_Forwardz_Robot'>ᴀᴠ ғᴏʀᴡᴀʀᴅ ʙᴏᴛ</a></blockquote>
 <blockquote>├⍟ 🇮🇳 Cʀᴇᴀᴛᴏʀ : <a href='https://t.me/AV_King1'>ཧᜰ꙰ꦿ➢𝐀𝐛𝔥𝕚ŞℍＥҜ༒</a></blockquote>
 <blockquote>├⍟ 📚 Lɪʙʀᴀʀʏ : <a href='https://docs.pyrogram.org/'>ᴘʏʀᴏɢʀᴀᴍ</a></blockquote>
 <blockquote>├⍟ 🍿 Lᴀɴɢᴜᴀɢᴇ : <a href='https://www.python.org/download/releases/3.0/'>ᴘʏᴛʜᴏɴ 𝟹</a></blockquote>
