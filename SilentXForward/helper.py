@@ -6,7 +6,7 @@ from SilentXForward.logger import (
     log_new_user, log_login, log_logout,
     log_source_added, log_source_removed, log_target_removed
 )
-from pyrogram import Client, filters, enums
+from pyrogram import Client, filters, enums, ContinuePropagation
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import (
     PhoneNumberInvalid, PhoneCodeInvalid, PhoneCodeExpired,
@@ -59,6 +59,12 @@ HELP_TEXT = """<b>⭐ Auto Forward Bot (Master Edition) ⭐
 🔍 Filter:
 /addfilter [word] | /remfilter [word] | /listfilters
 
+✅ Whitelist (same as Filter):
+/whitelist [word] | /remove_whitelist [word]
+
+🚫 Blacklist (in words wale messages skip honge):
+/blacklist [word] | /remove_blacklist [word] | /listblacklist
+
 ✍️ Footer:
 /endtext [Text] | /remendtext | /listendtext
 
@@ -70,6 +76,12 @@ HELP_TEXT = """<b>⭐ Auto Forward Bot (Master Edition) ⭐
 
 🧹 Remove Words:
 /addremoveword Word | /remremoveword Word | /listremovewords | /clearremovewords
+
+💥 Danger Zone:
+/reset — Reset EVERYTHING (Caption, Filters, Words, Footer + Channels)
+
+🖲️ Button Menu:
+/settings ya /manage — Sab kuch buttons se manage karo (recommended!)
 
 📊 Management:
 /set &lt;source&gt; &lt;target&gt; | /remove_target | /remove_source | /list | /clear
@@ -263,9 +275,7 @@ async def cmd_on(client, message: Message):
 
 # ==================== STATUS ====================
 
-@Client.on_message(filters.command("status") & filters.private)
-async def cmd_status(client, message: Message):
-    user_id  = message.from_user.id
+async def _build_status_text(user_id: int) -> str:
     settings = await database.get_all_settings(user_id)
     mappings = await database.get_user_mappings(user_id)
     count    = await database.get_forward_count(user_id)
@@ -281,7 +291,7 @@ async def cmd_status(client, message: Message):
     ub = active_userbots.get(user_id)
     session_status = "🟢 Active" if (ub and ub.is_connected) else "🔴 Not logged in"
 
-    text = (
+    return (
         f"<b>📊 Status Dashboard</b>\n\n"
         f"👤 Session: {session_status}\n"
         f"📡 Forwarding: {'▶️ ON' if fwd_on else '⏸️ OFF'}\n"
@@ -294,6 +304,10 @@ async def cmd_status(client, message: Message):
         f"🔁 Replace Rules: <b>{repl_cnt}</b>\n"
         f"🧹 Remove Words: <b>{rmw_cnt}</b>"
     )
+
+@Client.on_message(filters.command("status") & filters.private)
+async def cmd_status(client, message: Message):
+    text = await _build_status_text(message.from_user.id)
     await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
 
 
@@ -374,6 +388,80 @@ async def cmd_listfilters(client, message: Message):
                                         parse_mode=enums.ParseMode.HTML)
     text = "<b>🔍 Active Filters:</b>\n\n"
     for i, w in enumerate(fil_list, 1):
+        text += f"{i}. <code>{w}</code>\n"
+    await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
+
+
+# ==================== WHITELIST (alias of Filters) ====================
+# ✅ NEW: /whitelist == /addfilter — sirf naam alag hai, kaam wahi hai
+# (sirf wahi messages forward honge jinme yeh word ho).
+
+@Client.on_message(filters.command("whitelist") & filters.private)
+async def cmd_whitelist(client, message: Message):
+    if len(message.command) < 2:
+        return await message.reply_text(
+            "<b>❌ Usage:</b> <code>/whitelist word</code>\n\nSirf wahi messages forward honge jisme yeh word ho.",
+            parse_mode=enums.ParseMode.HTML
+        )
+    word = " ".join(message.command[1:]).lower().strip()
+    added = await database.add_filter(message.from_user.id, word)
+    if added:
+        await message.reply_text(f"✅ <b>Whitelist word added:</b> <code>{word}</code>", parse_mode=enums.ParseMode.HTML)
+    else:
+        await message.reply_text(f"⚠️ <b>Already exists:</b> <code>{word}</code>", parse_mode=enums.ParseMode.HTML)
+
+@Client.on_message(filters.command("remove_whitelist") & filters.private)
+async def cmd_remove_whitelist(client, message: Message):
+    if len(message.command) < 2:
+        return await message.reply_text(
+            "<b>❌ Usage:</b> <code>/remove_whitelist word</code>", parse_mode=enums.ParseMode.HTML
+        )
+    word = " ".join(message.command[1:]).lower().strip()
+    removed = await database.remove_filter(message.from_user.id, word)
+    if removed:
+        await message.reply_text(f"🗑️ <b>Whitelist word removed:</b> <code>{word}</code>", parse_mode=enums.ParseMode.HTML)
+    else:
+        await message.reply_text(f"⚠️ <b>Not found:</b> <code>{word}</code>", parse_mode=enums.ParseMode.HTML)
+
+
+# ==================== BLACKLIST (opposite of Whitelist) ====================
+# ✅ NEW: in words wale messages SKIP ho jaayenge (forward nahi honge).
+
+@Client.on_message(filters.command("blacklist") & filters.private)
+async def cmd_blacklist(client, message: Message):
+    if len(message.command) < 2:
+        return await message.reply_text(
+            "<b>❌ Usage:</b> <code>/blacklist word</code>\n\nYeh word jis message mein hoga, woh forward nahi hoga.",
+            parse_mode=enums.ParseMode.HTML
+        )
+    word = " ".join(message.command[1:]).lower().strip()
+    added = await database.add_blacklist_word(message.from_user.id, word)
+    if added:
+        await message.reply_text(f"✅ <b>Blacklist word added:</b> <code>{word}</code>", parse_mode=enums.ParseMode.HTML)
+    else:
+        await message.reply_text(f"⚠️ <b>Already exists:</b> <code>{word}</code>", parse_mode=enums.ParseMode.HTML)
+
+@Client.on_message(filters.command("remove_blacklist") & filters.private)
+async def cmd_remove_blacklist(client, message: Message):
+    if len(message.command) < 2:
+        return await message.reply_text(
+            "<b>❌ Usage:</b> <code>/remove_blacklist word</code>", parse_mode=enums.ParseMode.HTML
+        )
+    word = " ".join(message.command[1:]).lower().strip()
+    removed = await database.remove_blacklist_word(message.from_user.id, word)
+    if removed:
+        await message.reply_text(f"🗑️ <b>Blacklist word removed:</b> <code>{word}</code>", parse_mode=enums.ParseMode.HTML)
+    else:
+        await message.reply_text(f"⚠️ <b>Not found:</b> <code>{word}</code>", parse_mode=enums.ParseMode.HTML)
+
+@Client.on_message(filters.command("listblacklist") & filters.private)
+async def cmd_listblacklist(client, message: Message):
+    bl = await database.get_blacklist(message.from_user.id)
+    if not bl:
+        return await message.reply_text("🚫 <b>No blacklist words set.</b>\n\nUse /blacklist to add one.",
+                                        parse_mode=enums.ParseMode.HTML)
+    text = "<b>🚫 Blacklist Words:</b>\n\n"
+    for i, w in enumerate(bl, 1):
         text += f"{i}. <code>{w}</code>\n"
     await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
 
@@ -581,6 +669,60 @@ async def cmd_listremovewords(client, message: Message):
 async def cmd_clearremovewords(client, message: Message):
     await database.clear_remove_words(message.from_user.id)
     await message.reply_text("🗑️ <b>All remove-words cleared!</b>", parse_mode=enums.ParseMode.HTML)
+
+
+# ==================== RESET ALL SETTINGS (Danger Zone) ====================
+# ✅ NEW: user agar confuse ho jaaye ya kuch galat set ho gaya ho, toh ek hi
+# command se saari customization (caption, filters, words, footer) reset
+# karke default pe wapas aa sake. Confirmation button ke bina reset nahi
+# hoga — galti se data delete na ho isliye.
+
+RESET_WARN_TEXT = (
+    "<b>┃💥⚠️ <u>DANGER ZONE</u> ⚠️💥</b>\n\n"
+    "<i>Are you sure you want to RESET EVERYTHING?</i>\n\n"
+    "This will delete Caption, Filters, Words, Footer/Prefix "
+    "<b>AND ALL your Source/Target channel mappings</b> — sab kuch.\n\n"
+    "⚠️ Yeh action <b>undo nahi ho sakta.</b>"
+)
+
+def _reset_confirm_markup(user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(_sc("✅ YES, RESET EVERYTHING"), callback_data=f"confirm_reset:{user_id}")],
+        [InlineKeyboardButton(_sc("❌ Cancel"), callback_data=f"cancel_reset:{user_id}")],
+    ])
+
+@Client.on_message(filters.command("reset") & filters.private)
+async def cmd_reset(client, message: Message):
+    await message.reply_text(
+        RESET_WARN_TEXT,
+        parse_mode=enums.ParseMode.HTML,
+        reply_markup=_reset_confirm_markup(message.from_user.id),
+    )
+
+@Client.on_callback_query(filters.regex(r"^confirm_reset:(\d+)$"))
+async def cb_confirm_reset(client, callback_query):
+    target_uid = int(callback_query.matches[0].group(1))
+    if callback_query.from_user.id != target_uid:
+        return await callback_query.answer("🚫 Yeh button aapke liye nahi hai!", show_alert=True)
+
+    await database.reset_all_settings(target_uid)
+    await callback_query.answer("✅ Reset ho gaya!")
+    await callback_query.message.edit_text(
+        "✅ <b>Everything Reset!</b>\n\n"
+        "Caption, Filters, Words, Footer aur saare Source/Target channel "
+        "mappings — sab delete ho gaye.\n\n"
+        "Naya setup shuru karne ke liye /set use karo.",
+        parse_mode=enums.ParseMode.HTML,
+    )
+
+@Client.on_callback_query(filters.regex(r"^cancel_reset:(\d+)$"))
+async def cb_cancel_reset(client, callback_query):
+    target_uid = int(callback_query.matches[0].group(1))
+    if callback_query.from_user.id != target_uid:
+        return await callback_query.answer("🚫 Yeh button aapke liye nahi hai!", show_alert=True)
+
+    await callback_query.answer("❌ Reset cancel kar diya.")
+    await callback_query.message.edit_text(MENU_HEADER, parse_mode=enums.ParseMode.HTML, reply_markup=_menu_main_markup())
 
 
 # ==================== STATS ====================
@@ -976,12 +1118,18 @@ async def cmd_cancel(client, message: Message):
                       "addreplace","remreplace","listreplace","clearreplace",
                       "addremoveword","remremoveword","listremovewords","clearremovewords",
                       "count","resetcount","addadmin","removeuser","ban","unban",
-                      "broadcast"])
+                      "broadcast","reset","settings","manage",
+                      "whitelist","remove_whitelist","blacklist","remove_blacklist","listblacklist"])  # ✅ FIX: naye commands add kiye — warna yeh handler unhe pehle hi "swallow" kar leta tha
 )
 async def login_step_handler(client, message: Message):
     user_id = message.from_user.id
     if user_id not in login_states:
-        return
+        # ✅ FIX: sirf 'return' karne se Pyrogram is group ke aage kisi
+        # aur handler (jaise /settings, /manage, /reset) ko chance hi nahi
+        # deta tha — ContinuePropagation se aage ke handlers ko turant
+        # mauka mil jaata hai, chahe woh command upar wali exclusion list
+        # mein add karna bhool jaaye.
+        raise ContinuePropagation
 
     state = login_states[user_id]
     step  = state.get("step")
@@ -1130,3 +1278,516 @@ async def login_step_handler(client, message: Message):
                 pass
             del login_states[user_id]
             await message.reply_text(f"<b>❌ Error:</b> <code>{e}</code>", parse_mode=enums.ParseMode.HTML)
+
+
+# ============================================================================
+# ==================== INTERACTIVE BUTTON SETTINGS MENU ====================
+# ============================================================================
+# ✅ NEW: /settings ya /manage command se saari settings ab buttons se hi
+# manage ho sakti hain — text commands yaad rakhne ki zaroorat nahi.
+# Jahan text input zaroori hai (word, delay value, channel id waghera),
+# wahan bot prompt karke reply ka wait karta hai (settings_states dict).
+
+settings_states: dict[int, dict] = {}   # user_id -> {"action": ..., "back": ...}
+
+MENU_HEADER = "<u><b><blockquote>⚙️ ᴍᴀɴᴀɢᴇ ᴄʜᴀɴɴᴇʟ sᴇᴛᴛɪɴɢs\n\n👇🏼 sᴇʟᴇᴄᴛ ᴀɴ ᴏᴘᴛɪᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ᴍᴀɴᴀɢᴇ:</b></blockquote></u>"
+# ✅ NEW: button labels ko sᴍᴀʟʟ ᴄᴀᴘꜱ unicode style mein dikhane ke liye —
+# sirf English letters convert hote hain, emoji/space/symbols waise hi rehte hain.
+_SMALLCAPS_MAP = str.maketrans(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀꜱᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀꜱᴛᴜᴠᴡxʏᴢ"
+)
+
+def _sc(text: str) -> str:
+    """Button label ko small-caps style mein convert karo."""
+    return text.translate(_SMALLCAPS_MAP)
+
+# action-key -> submenu jahan wapas jaana hai jab input mil jaaye ya cancel ho
+_INPUT_BACK_MENU = {
+    "delay": "delay",
+    "filter_add": "filters", "filter_rem": "filters",
+    "blacklist_add": "filters", "blacklist_rem": "filters",
+    "footer_set": "footer",
+    "caption_set": "caption",
+    "replace_add": "replace", "replace_rem": "replace",
+    "remword_add": "removewords", "remword_rem": "removewords",
+    "mapping_set": "manage", "mapping_remtarget": "manage", "mapping_remsource": "manage",
+    "admin_add": "admin", "admin_ban": "admin", "admin_unban": "admin",
+}
+
+INPUT_PROMPTS = {
+    "delay":              "✏️ <b>Naya delay (seconds) bhejo:</b>\n\n<i>Example: 0.3</i>",
+    "filter_add":         "➕ <b>Whitelist word bhejo</b> jo add karna hai:",
+    "filter_rem":         "🗑️ <b>Whitelist word bhejo</b> jo remove karna hai:",
+    "blacklist_add":      "➕ <b>Blacklist word bhejo</b> jo add karna hai:",
+    "blacklist_rem":      "🗑️ <b>Blacklist word bhejo</b> jo remove karna hai:",
+    "footer_set":         "✏️ <b>Naya footer/prefix text bhejo:</b>",
+    "caption_set":        CAPTION_VARS_TEXT + "\n\n✏️ <b>Ab apna template bhejo:</b>",
+    "replace_add":        "➕ <b>Replace rule bhejo</b> — format: <code>Old:New</code>\n(multiple ke liye <code>|</code> se separate karo)",
+    "replace_rem":        "🗑️ <b>'Old' word bhejo</b> jiska rule remove karna hai:",
+    "remword_add":        "➕ <b>Word(s) bhejo</b> jo remove-list mein add karne hain (<code>|</code> se separate):",
+    "remword_rem":        "🗑️ <b>Word(s) bhejo</b> jo remove-list se hatane hain:",
+    "mapping_set":        "➕ <b>Source aur Target channel ID/username bhejo</b>, space se separate:\n\n<i>Example: -1001234567890 -1009876543210</i>",
+    "mapping_remtarget":  "🗑️ <b>Source aur Target ID bhejo</b> (space se separate) jise mapping se hatana hai:",
+    "mapping_remsource":  "🗑️ <b>Source channel ID bhejo</b> jise poori tarah remove karna hai:",
+    "admin_add":          "➕ <b>User ID bhejo</b> jise admin banana hai:",
+    "admin_ban":          "🚫 <b>User ID bhejo</b> jise ban karna hai:",
+    "admin_unban":        "✅ <b>User ID bhejo</b> jise unban karna hai:",
+}
+
+
+def _menu_main_markup() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(_sc("⏱️ Delay"), callback_data="menu:delay"),
+         InlineKeyboardButton(_sc("🔍 Filters"), callback_data="menu:filters")],
+        [InlineKeyboardButton(_sc("✍️ Footer"), callback_data="menu:footer"),
+         InlineKeyboardButton(_sc("📝 Caption"), callback_data="menu:caption")],
+        [InlineKeyboardButton(_sc("🔁 Replace Words"), callback_data="menu:replace"),
+         InlineKeyboardButton(_sc("🧹 Remove Words"), callback_data="menu:removewords")],
+        [InlineKeyboardButton(_sc("📊 Manage Channels"), callback_data="menu:manage"),
+         InlineKeyboardButton(_sc("📈 Stats"), callback_data="menu:stats")],
+        [InlineKeyboardButton(_sc("🔑 Login / Session"), callback_data="menu:login"),
+         InlineKeyboardButton(_sc("👑 Admin"), callback_data="menu:admin")],
+        [InlineKeyboardButton(_sc("ℹ️ Status"), callback_data="menu:status"),
+         InlineKeyboardButton(_sc("⏯️ Toggle Forward"), callback_data="menu:toggle")],
+        [InlineKeyboardButton(_sc("🧨 RESET ALL SETTINGS"), callback_data="menu:reset")],
+        [InlineKeyboardButton(_sc("🔙 Back"), callback_data="menu:back"),
+         InlineKeyboardButton(_sc("❌ Close"), callback_data="menu:close")],
+    ])
+
+def _back_menu_button(target: str = "main") -> list:
+    return [InlineKeyboardButton(_sc("🔙 Back to Menu"), callback_data=f"menu:{target}")]
+
+
+# ── Submenu renderers: har ek (text, markup) return karta hai ──────────────
+
+async def _render_delay(user_id):
+    delay = await database.get_delay(user_id)
+    text = f"⏱️ <b>Message Delay</b>\n\nCurrent: <code>{delay}s</code>\n\nPreset choose karo ya custom bhejo:"
+    kb = [
+        [InlineKeyboardButton(_sc("0.1s"), callback_data="delay:0.1"), InlineKeyboardButton(_sc("0.5s"), callback_data="delay:0.5")],
+        [InlineKeyboardButton(_sc("1s"), callback_data="delay:1"), InlineKeyboardButton(_sc("2s"), callback_data="delay:2")],
+        [InlineKeyboardButton(_sc("✏️ Custom"), callback_data="input:delay")],
+        _back_menu_button(),
+    ]
+    return text, InlineKeyboardMarkup(kb)
+
+async def _render_filters(user_id):
+    words = await database.get_filters(user_id)
+    bl = await database.get_blacklist(user_id)
+    text = "🔍 <b>Whitelist Words</b> <i>(sirf yeh wale forward honge)</i>\n\n"
+    text += "\n".join(f"• <code>{w}</code>" for w in words) if words else "<i>Empty — sab messages forward honge.</i>"
+    text += "\n\n🚫 <b>Blacklist Words</b> <i>(yeh wale skip honge)</i>\n\n"
+    text += "\n".join(f"• <code>{w}</code>" for w in bl) if bl else "<i>Empty.</i>"
+    kb = [
+        [InlineKeyboardButton(_sc("➕ Add Whitelist"), callback_data="input:filter_add"),
+         InlineKeyboardButton(_sc("🗑️ Remove"), callback_data="input:filter_rem")],
+        [InlineKeyboardButton(_sc("➕ Add Blacklist"), callback_data="input:blacklist_add"),
+         InlineKeyboardButton(_sc("🗑️ Remove"), callback_data="input:blacklist_rem")],
+        [InlineKeyboardButton(_sc("🧹 Clear Whitelist"), callback_data="action:filter_clear"),
+         InlineKeyboardButton(_sc("🧹 Clear Blacklist"), callback_data="action:blacklist_clear")],
+        _back_menu_button(),
+    ]
+    return text, InlineKeyboardMarkup(kb)
+
+async def _render_footer(user_id):
+    footer = await database.get_endtext(user_id)
+    text = "✍️ <b>Footer / Prefix Text</b>\n\n"
+    text += f"<code>{footer}</code>" if footer else "<i>No footer set.</i>"
+    kb = [
+        [InlineKeyboardButton(_sc("✏️ Set"), callback_data="input:footer_set"),
+         InlineKeyboardButton(_sc("🗑️ Remove"), callback_data="action:footer_rem")],
+        _back_menu_button(),
+    ]
+    return text, InlineKeyboardMarkup(kb)
+
+async def _render_caption(user_id):
+    tmpl = await database.get_caption_template(user_id)
+    text = "📝 <b>Custom Caption Template</b>\n\n"
+    text += f"<code>{tmpl}</code>" if tmpl else "<i>No caption template set — default caption use hogi.</i>"
+    kb = [
+        [InlineKeyboardButton(_sc("✏️ Set"), callback_data="input:caption_set"),
+         InlineKeyboardButton(_sc("🗑️ Remove"), callback_data="action:caption_rem")],
+        [InlineKeyboardButton(_sc("📚 Variables List"), callback_data="action:caption_vars")],
+        _back_menu_button(),
+    ]
+    return text, InlineKeyboardMarkup(kb)
+
+async def _render_replace(user_id):
+    rules = await database.get_replacements(user_id)
+    text = "🔁 <b>Replace Words</b>\n\n"
+    text += "\n".join(f"{i}. <code>{o}</code> → <code>{n}</code>" for i, (o, n) in enumerate(rules, 1)) if rules else "<i>No rules set.</i>"
+    kb = [
+        [InlineKeyboardButton(_sc("➕ Add"), callback_data="input:replace_add"),
+         InlineKeyboardButton(_sc("🗑️ Remove"), callback_data="input:replace_rem")],
+        [InlineKeyboardButton(_sc("🧹 Clear All"), callback_data="action:replace_clear")],
+        _back_menu_button(),
+    ]
+    return text, InlineKeyboardMarkup(kb)
+
+async def _render_removewords(user_id):
+    words = await database.get_remove_words(user_id)
+    text = "🧹 <b>Remove Words</b>\n\n"
+    text += "\n".join(f"• <code>{w}</code>" for w in words) if words else "<i>No remove-words set.</i>"
+    kb = [
+        [InlineKeyboardButton(_sc("➕ Add"), callback_data="input:remword_add"),
+         InlineKeyboardButton(_sc("🗑️ Remove"), callback_data="input:remword_rem")],
+        [InlineKeyboardButton(_sc("🧹 Clear All"), callback_data="action:remword_clear")],
+        _back_menu_button(),
+    ]
+    return text, InlineKeyboardMarkup(kb)
+
+async def _render_manage(user_id):
+    mappings = await database.get_user_mappings(user_id)
+    text = "📊 <b>Manage Source/Target Channels</b>\n\n"
+    if mappings:
+        for m in mappings:
+            text += f"📥 <code>{m['source_id']}</code> → {len(m.get('target_ids', []))} target(s)\n"
+    else:
+        text += "<i>No mappings yet.</i>"
+    kb = [
+        [InlineKeyboardButton(_sc("➕ Set New"), callback_data="input:mapping_set")],
+        [InlineKeyboardButton(_sc("🗑️ Remove Target"), callback_data="input:mapping_remtarget"),
+         InlineKeyboardButton(_sc("🗑️ Remove Source"), callback_data="input:mapping_remsource")],
+        [InlineKeyboardButton(_sc("🧨 Clear All Channels"), callback_data="action:mapping_clear")],
+        _back_menu_button(),
+    ]
+    return text, InlineKeyboardMarkup(kb)
+
+async def _render_stats(user_id):
+    count = await database.get_forward_count(user_id)
+    text = f"📈 <b>Forward Stats</b>\n\n✅ Total Forwarded: <b>{count}</b> messages"
+    kb = [
+        [InlineKeyboardButton(_sc("🔄 Reset Count"), callback_data="action:count_reset")],
+        _back_menu_button(),
+    ]
+    return text, InlineKeyboardMarkup(kb)
+
+async def _render_login(user_id):
+    session = await database.get_userbot_session(user_id)
+    if session:
+        from SilentXForward.forward import active_userbots
+        ub = active_userbots.get(user_id)
+        status = "🟢 Active" if (ub and ub.is_connected) else "🔴 Inactive (restart bot)"
+        text = (f"🔑 <b>Session Info</b>\n\n👤 Status: {status}\n"
+                f"📱 Phone: {session.get('phone','N/A')}\n🕐 Login: {session.get('created_at','N/A')}")
+        kb = [[InlineKeyboardButton(_sc("🚪 Logout"), callback_data="action:logout")], _back_menu_button()]
+    else:
+        text = "🔑 <b>Userbot Login</b>\n\nAap logged in nahi ho.\n\n<i>Login karne ke liye /login command use karo (security ke liye phone/OTP button se nahi liya jaata).</i>"
+        kb = [_back_menu_button()]
+    return text, InlineKeyboardMarkup(kb)
+
+async def _render_admin(user_id):
+    text = "👑 <b>Admin Tools</b>\n\nAdmin add/remove aur ban/unban yahan se karo."
+    kb = [
+        [InlineKeyboardButton(_sc("➕ Add Admin"), callback_data="input:admin_add")],
+        [InlineKeyboardButton(_sc("🚫 Ban User"), callback_data="input:admin_ban"),
+         InlineKeyboardButton(_sc("✅ Unban User"), callback_data="input:admin_unban")],
+        _back_menu_button(),
+    ]
+    return text, InlineKeyboardMarkup(kb)
+
+_MENU_RENDERERS = {
+    "delay": _render_delay, "filters": _render_filters, "footer": _render_footer,
+    "caption": _render_caption, "replace": _render_replace, "removewords": _render_removewords,
+    "manage": _render_manage, "stats": _render_stats, "login": _render_login, "admin": _render_admin,
+}
+
+
+@Client.on_message(filters.command(["settings", "manage"]) & filters.private)
+async def cmd_settings_menu(client, message: Message):
+    await message.reply_text(MENU_HEADER, parse_mode=enums.ParseMode.HTML, reply_markup=_menu_main_markup())
+
+
+@Client.on_callback_query(filters.regex(r"^menu:(.+)$"))
+async def cb_menu_router(client, callback_query):
+    user_id = callback_query.from_user.id
+    key = callback_query.matches[0].group(1)
+
+    if key == "main":
+        await callback_query.answer()
+        return await callback_query.message.edit_text(MENU_HEADER, parse_mode=enums.ParseMode.HTML, reply_markup=_menu_main_markup())
+
+    if key == "back":
+        await callback_query.answer()
+        return await callback_query.message.edit_text(START_TEXT, parse_mode=enums.ParseMode.HTML, reply_markup=BUTTONS)
+
+    if key == "close":
+        await callback_query.answer()
+        try:
+            await callback_query.message.delete()
+        except Exception:
+            pass
+        return
+
+    if key == "toggle":
+        enabled = await database.is_forwarding_enabled(user_id)
+        await database.set_forwarding(user_id, not enabled)
+        await callback_query.answer("▶️ Forwarding Resumed!" if not enabled else "⏸️ Forwarding Paused!")
+        return await callback_query.message.edit_text(MENU_HEADER, parse_mode=enums.ParseMode.HTML, reply_markup=_menu_main_markup())
+
+    if key == "reset":
+        await callback_query.answer()
+        return await callback_query.message.edit_text(
+            RESET_WARN_TEXT, parse_mode=enums.ParseMode.HTML, reply_markup=_reset_confirm_markup(user_id)
+        )
+
+    if key == "status":
+        await callback_query.answer()
+        text = await _build_status_text(user_id)
+        kb = InlineKeyboardMarkup([_back_menu_button()])
+        return await callback_query.message.edit_text(text, parse_mode=enums.ParseMode.HTML, reply_markup=kb)
+
+    fn = _MENU_RENDERERS.get(key)
+    if fn:
+        await callback_query.answer()
+        text, kb = await fn(user_id)
+        return await callback_query.message.edit_text(text, parse_mode=enums.ParseMode.HTML, reply_markup=kb)
+
+    await callback_query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^delay:(.+)$"))
+async def cb_delay_preset(client, callback_query):
+    user_id = callback_query.from_user.id
+    value = float(callback_query.matches[0].group(1))
+    await database.set_delay(user_id, value)
+    await callback_query.answer(f"✅ Delay set to {value}s")
+    text, kb = await _render_delay(user_id)
+    await callback_query.message.edit_text(text, parse_mode=enums.ParseMode.HTML, reply_markup=kb)
+
+
+@Client.on_callback_query(filters.regex(r"^action:(.+)$"))
+async def cb_menu_action(client, callback_query):
+    user_id = callback_query.from_user.id
+    action  = callback_query.matches[0].group(1)
+    msg = ""
+
+    if action == "filter_clear":
+        await database.clear_filters(user_id)
+        msg = "🧹 All whitelist words cleared!"
+        text, kb = await _render_filters(user_id)
+    elif action == "blacklist_clear":
+        await database.clear_blacklist(user_id)
+        msg = "🧹 All blacklist words cleared!"
+        text, kb = await _render_filters(user_id)
+    elif action == "footer_rem":
+        await database.remove_endtext(user_id)
+        msg = "🗑️ Footer removed!"
+        text, kb = await _render_footer(user_id)
+    elif action == "caption_rem":
+        await database.remove_caption_template(user_id)
+        msg = "🗑️ Caption removed!"
+        text, kb = await _render_caption(user_id)
+    elif action == "caption_vars":
+        await callback_query.answer()
+        kb = InlineKeyboardMarkup([_back_menu_button("caption")])
+        return await callback_query.message.edit_text(CAPTION_VARS_TEXT, parse_mode=enums.ParseMode.HTML, reply_markup=kb)
+    elif action == "replace_clear":
+        await database.clear_replacements(user_id)
+        msg = "🧹 All replace rules cleared!"
+        text, kb = await _render_replace(user_id)
+    elif action == "remword_clear":
+        await database.clear_remove_words(user_id)
+        msg = "🧹 All remove-words cleared!"
+        text, kb = await _render_removewords(user_id)
+    elif action == "mapping_clear":
+        n = await database.clear_all_mappings(user_id)
+        msg = f"🧨 {n} mapping(s) cleared!"
+        text, kb = await _render_manage(user_id)
+    elif action == "count_reset":
+        await database.reset_forward_count(user_id)
+        msg = "🔄 Count reset!"
+        text, kb = await _render_stats(user_id)
+    elif action == "logout":
+        from SilentXForward.forward import active_userbots
+        ub = active_userbots.get(user_id)
+        if ub:
+            try:
+                await ub.stop()
+            except Exception:
+                pass
+            active_userbots.pop(user_id, None)
+        await database.delete_userbot_session(user_id)
+        msg = "🚪 Logged out!"
+        text, kb = await _render_login(user_id)
+    else:
+        return await callback_query.answer()
+
+    await callback_query.answer(msg)
+    await callback_query.message.edit_text(text, parse_mode=enums.ParseMode.HTML, reply_markup=kb)
+
+
+@Client.on_callback_query(filters.regex(r"^input:(.+)$"))
+async def cb_menu_input_prompt(client, callback_query):
+    user_id = callback_query.from_user.id
+    key = callback_query.matches[0].group(1)
+    prompt = INPUT_PROMPTS.get(key)
+    if not prompt:
+        return await callback_query.answer()
+
+    settings_states[user_id] = {"action": key, "back": _INPUT_BACK_MENU.get(key, "main")}
+    await callback_query.answer()
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton(_sc("❌ Cancel"), callback_data="input_cancel")]])
+    await callback_query.message.edit_text(
+        f"{prompt}\n\n<i>Cancel karne ke liye neeche button dabao.</i>",
+        parse_mode=enums.ParseMode.HTML, reply_markup=kb
+    )
+
+
+@Client.on_callback_query(filters.regex(r"^input_cancel$"))
+async def cb_menu_input_cancel(client, callback_query):
+    user_id = callback_query.from_user.id
+    state = settings_states.pop(user_id, None)
+    back_key = state.get("back", "main") if state else "main"
+    await callback_query.answer("❌ Cancelled")
+
+    if back_key == "main" or back_key not in _MENU_RENDERERS:
+        return await callback_query.message.edit_text(MENU_HEADER, parse_mode=enums.ParseMode.HTML, reply_markup=_menu_main_markup())
+    text, kb = await _MENU_RENDERERS[back_key](user_id)
+    await callback_query.message.edit_text(text, parse_mode=enums.ParseMode.HTML, reply_markup=kb)
+
+
+# ── Text-input capture (group=2 taaki group-0 ke login handler se conflict na ho) ──
+@Client.on_message(
+    filters.private & filters.text & filters.create(lambda _, __, m: m.from_user.id in settings_states),
+    group=2,
+)
+async def settings_menu_input_handler(client, message: Message):
+    user_id = message.from_user.id
+    state = settings_states.pop(user_id, None)
+    if not state:
+        return
+
+    action   = state["action"]
+    back_key = state.get("back", "main")
+    raw = message.text.strip()
+    msg = ""
+
+    try:
+        if action == "delay":
+            val = float(raw)
+            await database.set_delay(user_id, val)
+            msg = f"✅ Delay set to {val}s"
+
+        elif action == "filter_add":
+            added = await database.add_filter(user_id, raw)
+            msg = "✅ Whitelist word added!" if added else "⚠️ Yeh word already hai."
+
+        elif action == "filter_rem":
+            removed = await database.remove_filter(user_id, raw)
+            msg = "🗑️ Whitelist word removed!" if removed else "⚠️ Yeh word mila nahi."
+
+        elif action == "blacklist_add":
+            added = await database.add_blacklist_word(user_id, raw)
+            msg = "✅ Blacklist word added!" if added else "⚠️ Yeh word already hai."
+
+        elif action == "blacklist_rem":
+            removed = await database.remove_blacklist_word(user_id, raw)
+            msg = "🗑️ Blacklist word removed!" if removed else "⚠️ Yeh word mila nahi."
+
+        elif action == "footer_set":
+            await database.set_endtext(user_id, raw)
+            msg = "✅ Footer set!"
+
+        elif action == "caption_set":
+            await database.set_caption_template(user_id, raw)
+            msg = "✅ Caption template set!"
+
+        elif action == "replace_add":
+            rules = []
+            for part in raw.split("|"):
+                part = part.strip()
+                if ":" in part:
+                    o, n = part.split(":", 1)
+                    rules.append((o.strip(), n.strip()))
+            added = await database.add_replacements(user_id, rules) if rules else 0
+            msg = f"✅ {added} rule(s) saved!" if rules else "❌ Format galat tha. <code>Old:New</code> use karo."
+
+        elif action == "replace_rem":
+            olds = [w.strip() for w in raw.split("|") if w.strip()]
+            removed = await database.remove_replacements(user_id, olds)
+            msg = f"🗑️ {removed} rule(s) removed!" if removed else "⚠️ Koi matching rule nahi mila."
+
+        elif action == "remword_add":
+            words = [w.strip() for w in raw.split("|") if w.strip()]
+            added = await database.add_remove_words(user_id, words)
+            msg = f"✅ {added} word(s) added!"
+
+        elif action == "remword_rem":
+            words = [w.strip() for w in raw.split("|") if w.strip()]
+            removed = await database.remove_remove_words(user_id, words)
+            msg = f"🗑️ {removed} word(s) removed!" if removed else "⚠️ Koi matching word nahi mila."
+
+        elif action == "mapping_set":
+            parts = raw.split()
+            if len(parts) != 2:
+                msg = "❌ Format galat. Example: <code>-1001234567890 -1009876543210</code>"
+            else:
+                src_chat = await smart_get_chat(client, parts[0], user_id)
+                tgt_chat = await smart_get_chat(client, parts[1], user_id)
+                result = await database.add_target_to_source(
+                    user_id, src_chat.id, tgt_chat.id, src_chat.title, tgt_chat.title
+                )
+                msg = "✅ Mapping set!" if result in ("created", "added") else "⚠️ Already exists!"
+
+        elif action == "mapping_remtarget":
+            parts = raw.split()
+            if len(parts) != 2:
+                msg = "❌ Format galat. Example: <code>-1001234567890 -1009876543210</code>"
+            else:
+                src_chat = await smart_get_chat(client, parts[0], user_id)
+                tgt_chat = await smart_get_chat(client, parts[1], user_id)
+                result = await database.remove_target_from_source(user_id, src_chat.id, tgt_chat.id)
+                msg = "🗑️ Target removed!" if result == "removed" else "⚠️ Not found."
+
+        elif action == "mapping_remsource":
+            src_chat = await smart_get_chat(client, raw, user_id)
+            removed = await database.remove_source(user_id, src_chat.id)
+            msg = "🗑️ Source removed!" if removed else "⚠️ Not found."
+
+        elif action == "admin_add":
+            if cfg.OWNER_ID and user_id != cfg.OWNER_ID:
+                msg = "🚫 Yeh sirf bot owner kar sakta hai."
+            else:
+                target = int(raw)
+                await database.add_admin(user_id, target)
+                msg = f"👑 Admin added: {target}"
+
+        elif action in ("admin_ban", "admin_unban"):
+            is_owner = bool(cfg.OWNER_ID) and user_id == cfg.OWNER_ID
+            allowed = is_owner or (cfg.OWNER_ID and await database.is_admin(cfg.OWNER_ID, user_id))
+            if not allowed:
+                msg = "🚫 Yeh sirf owner ya admin kar sakta hai."
+            else:
+                target = int(raw)
+                if action == "admin_ban":
+                    if cfg.OWNER_ID and target == cfg.OWNER_ID:
+                        msg = "❌ Owner ko ban nahi kar sakte."
+                    else:
+                        await database.ban_user(cfg.OWNER_ID, target)
+                        from SilentXForward.forward import active_userbots
+                        ub = active_userbots.pop(target, None)
+                        if ub:
+                            try:
+                                await ub.stop()
+                            except Exception:
+                                pass
+                        msg = f"🚫 User banned: {target}"
+                else:
+                    unbanned = await database.unban_user(cfg.OWNER_ID, target)
+                    msg = f"✅ User unbanned: {target}" if unbanned else "⚠️ User ban list mein nahi hai."
+
+    except ValueError:
+        msg = "❌ Galat format — sahi value bhejo."
+    except Exception as e:
+        logger.exception("settings_menu_input_handler error")
+        msg = f"❌ Error: <code>{e}</code>"
+
+    if back_key in _MENU_RENDERERS:
+        text, kb = await _MENU_RENDERERS[back_key](user_id)
+        text = f"{msg}\n\n{text}" if msg else text
+    else:
+        text, kb = MENU_HEADER, _menu_main_markup()
+
+    await message.reply_text(text, parse_mode=enums.ParseMode.HTML, reply_markup=kb)

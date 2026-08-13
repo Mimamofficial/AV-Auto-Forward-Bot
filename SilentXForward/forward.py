@@ -512,6 +512,17 @@ async def process_buffered_messages(source_chat_id, source_client=None):
             else:
                 messages_to_send = messages
 
+            # ✅ NEW: Blacklist — in words wale messages skip ho jaayenge
+            user_blacklist = await database.get_blacklist(user_id) if user_id else []
+            if user_blacklist:
+                messages_to_send = [
+                    msg for msg in messages_to_send
+                    if not any(w in (msg.text or msg.caption or "").lower() for w in user_blacklist)
+                ]
+                if not messages_to_send:
+                    logger.info(f"All messages blacklisted for user {user_id}")
+                    continue
+
             msg_delay        = await database.get_delay(user_id) if user_id else MSG_DELAY
             endtext          = await database.get_endtext(user_id) if user_id else None
             caption_template = await database.get_caption_template(user_id) if user_id else None
