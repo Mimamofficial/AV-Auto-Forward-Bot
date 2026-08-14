@@ -2,7 +2,7 @@
 
 A Powerful And Efficient Telegram Bot Designed To Forward Videos And Documents From Multiple Source Channels To Multiple Target Channels Without The "Forwarded From" Tag.
 
-**Join Telegram - [SilentXBotz](https://t.me/SilentXBotz)**
+**Join Telegram - [MRN_Officialx](https://t.me/MRN_Officialx)**
 
 ## What's New ? 
 - Now User Can Set There Source And Target Chat From Bot PM.
@@ -81,4 +81,4 @@ The Bot Is Configured Using .
 ## Credits
 
 - Built With [Pyrogram](https://github.com/pyrogram/pyrogram)
-- Maintained By [SilentXBotz](https://t.me/SilentXBotz)
+- Maintained By [MRN_Officialx](https://t.me/MRN_Officialx)
