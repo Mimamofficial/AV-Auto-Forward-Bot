@@ -83,6 +83,9 @@ HELP_TEXT = """<b>⭐ Auto Forward Bot (Master Edition) ⭐
 🖲️ Button Menu:
 /settings ya /manage — Sab kuch buttons se manage karo (recommended!)
 
+🎛️ Custom Filters:
+/customfilters — Content-type toggles (Text/Doc/Video/Photo/Audio/Sticker/Forward-Tag)
+
 📊 Management:
 /set &lt;source&gt; &lt;target&gt; | /remove_target | /remove_source | /list | /clear
 
@@ -1119,7 +1122,8 @@ async def cmd_cancel(client, message: Message):
                       "addremoveword","remremoveword","listremovewords","clearremovewords",
                       "count","resetcount","addadmin","removeuser","ban","unban",
                       "broadcast","reset","settings","manage",
-                      "whitelist","remove_whitelist","blacklist","remove_blacklist","listblacklist"])  # ✅ FIX: naye commands add kiye — warna yeh handler unhe pehle hi "swallow" kar leta tha
+                      "whitelist","remove_whitelist","blacklist","remove_blacklist","listblacklist",
+                      "customfilters"])  # ✅ FIX: naye commands add kiye — warna yeh handler unhe pehle hi "swallow" kar leta tha
 )
 async def login_step_handler(client, message: Message):
     user_id = message.from_user.id
@@ -1290,7 +1294,8 @@ async def login_step_handler(client, message: Message):
 
 settings_states: dict[int, dict] = {}   # user_id -> {"action": ..., "back": ...}
 
-MENU_HEADER = "<u><b><blockquote>⚙️ ᴍᴀɴᴀɢᴇ ᴄʜᴀɴɴᴇʟ sᴇᴛᴛɪɴɢs\n\n👇🏼 sᴇʟᴇᴄᴛ ᴀɴ ᴏᴘᴛɪᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ᴍᴀɴᴀɢᴇ:</b></blockquote></u>"
+MENU_HEADER = "🖐 <b>Select an option below to manage:</b>"
+
 # ✅ NEW: button labels ko sᴍᴀʟʟ ᴄᴀᴘꜱ unicode style mein dikhane ke liye —
 # sirf English letters convert hote hain, emoji/space/symbols waise hi rehte hain.
 _SMALLCAPS_MAP = str.maketrans(
@@ -1344,6 +1349,7 @@ def _menu_main_markup() -> InlineKeyboardMarkup:
          InlineKeyboardButton(_sc("📝 Caption"), callback_data="menu:caption")],
         [InlineKeyboardButton(_sc("🔁 Replace Words"), callback_data="menu:replace"),
          InlineKeyboardButton(_sc("🧹 Remove Words"), callback_data="menu:removewords")],
+        [InlineKeyboardButton(_sc("🎛️ Custom Filters"), callback_data="menu:customfilters")],
         [InlineKeyboardButton(_sc("📊 Manage Channels"), callback_data="menu:manage"),
          InlineKeyboardButton(_sc("📈 Stats"), callback_data="menu:stats")],
         [InlineKeyboardButton(_sc("🔑 Login / Session"), callback_data="menu:login"),
@@ -1487,16 +1493,52 @@ async def _render_admin(user_id):
     ]
     return text, InlineKeyboardMarkup(kb)
 
+
+# ── Custom Filters (content-type toggles, screenshot jaisa) ──
+_CF_LABELS = {
+    "forward_tag": "🏷️ Forward Tag",
+    "text":        "📝 Texts",
+    "document":    "📁 Documents",
+    "video":       "🎬 Videos",
+    "photo":       "📷 Photos",
+    "audio":       "🎧 Audios",
+    "sticker":     "🎭 Stickers",
+}
+
+async def _render_customfilters(user_id):
+    cf = await database.get_content_filters(user_id)
+    text = (
+        "🎛️ <b>Custom Filters</b>\n\n"
+        "Configure karo kis type ke messages forward karne hain:\n"
+        "<i>(🏷️ Forward Tag ON = \"Forwarded From\" tag ke saath bhejega, "
+        "OFF = clean copy — caption/footer customization sirf OFF mein kaam karega)</i>"
+    )
+    kb = []
+    for key, label in _CF_LABELS.items():
+        icon = "✅" if cf.get(key) else "❌"
+        kb.append([
+            InlineKeyboardButton(_sc(label), callback_data=f"cf:{key}"),
+            InlineKeyboardButton(icon, callback_data=f"cf:{key}"),
+        ])
+    kb.append(_back_menu_button())
+    return text, InlineKeyboardMarkup(kb)
+
 _MENU_RENDERERS = {
     "delay": _render_delay, "filters": _render_filters, "footer": _render_footer,
     "caption": _render_caption, "replace": _render_replace, "removewords": _render_removewords,
     "manage": _render_manage, "stats": _render_stats, "login": _render_login, "admin": _render_admin,
+    "customfilters": _render_customfilters,
 }
 
 
 @Client.on_message(filters.command(["settings", "manage"]) & filters.private)
 async def cmd_settings_menu(client, message: Message):
     await message.reply_text(MENU_HEADER, parse_mode=enums.ParseMode.HTML, reply_markup=_menu_main_markup())
+
+@Client.on_message(filters.command("customfilters") & filters.private)
+async def cmd_customfilters(client, message: Message):
+    text, kb = await _render_customfilters(message.from_user.id)
+    await message.reply_text(text, parse_mode=enums.ParseMode.HTML, reply_markup=kb)
 
 
 @Client.on_callback_query(filters.regex(r"^menu:(.+)$"))
@@ -1554,6 +1596,19 @@ async def cb_delay_preset(client, callback_query):
     await database.set_delay(user_id, value)
     await callback_query.answer(f"✅ Delay set to {value}s")
     text, kb = await _render_delay(user_id)
+    await callback_query.message.edit_text(text, parse_mode=enums.ParseMode.HTML, reply_markup=kb)
+
+
+@Client.on_callback_query(filters.regex(r"^cf:(.+)$"))
+async def cb_content_filter_toggle(client, callback_query):
+    user_id = callback_query.from_user.id
+    key = callback_query.matches[0].group(1)
+    try:
+        new_val = await database.toggle_content_filter(user_id, key)
+    except ValueError:
+        return await callback_query.answer("⚠️ Unknown option")
+    await callback_query.answer("✅ ON" if new_val else "❌ OFF")
+    text, kb = await _render_customfilters(user_id)
     await callback_query.message.edit_text(text, parse_mode=enums.ParseMode.HTML, reply_markup=kb)
 
 

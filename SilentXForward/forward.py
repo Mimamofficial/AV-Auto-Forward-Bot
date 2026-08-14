@@ -158,6 +158,28 @@ async def handle_flood(func, **kwargs):
     raise Exception("Max retries exceeded in handle_flood")
 
 
+def _content_type_allowed(msg, content_filters: dict) -> bool:
+    """
+    ✅ NEW: 'Custom Filters' — content-type ke hisaab se allow/block.
+    Jo type disabled hai (toggle OFF), uska message forward nahi hoga.
+    Jin types ka koi toggle nahi hai (poll, location, contact, voice,
+    video_note, animation) — woh hamesha allowed rahenge.
+    """
+    if getattr(msg, "sticker", None):
+        return content_filters.get("sticker", True)
+    if getattr(msg, "document", None):
+        return content_filters.get("document", True)
+    if getattr(msg, "video", None):
+        return content_filters.get("video", True)
+    if getattr(msg, "photo", None):
+        return content_filters.get("photo", True)
+    if getattr(msg, "audio", None):
+        return content_filters.get("audio", True)
+    if getattr(msg, "text", None):
+        return content_filters.get("text", True)
+    return True
+
+
 async def _ensure_peer_resolved(writer, chat_id: int) -> bool:
     """
     ✅ FIX: copy_message se pehle target ka peer resolve/cache karo. Isse
@@ -194,6 +216,21 @@ async def forward_single_message(client, message, chat_id, sender_client=None, c
         await _ensure_peer_resolved(writer, chat_id)
 
         cs = caption_settings or {}
+
+        # ✅ NEW: "Forward tag" ON hai toh asli forward karo ("Forwarded From"
+        # tag ke saath) — is mode mein caption customization possible nahi
+        # hai (Telegram forward_messages caption change allow nahi karta),
+        # isliye seedha original message forward ho jaata hai.
+        if cs.get("forward_tag"):
+            await handle_flood(
+                writer.forward_messages,
+                chat_id=chat_id,
+                from_chat_id=message.chat.id,
+                message_ids=message.id,
+            )
+            _invalid_target_strikes.pop(chat_id, None)
+            return True
+
         has_customization = bool(
             cs.get("caption_template") or cs.get("endtext") or
             cs.get("replace_rules") or cs.get("remove_words")
@@ -337,6 +374,7 @@ async def process_queue(client):
                 "caption_template": source_info.get("caption_template", "") or "",
                 "replace_rules": source_info.get("replace_rules") or [],
                 "remove_words": source_info.get("remove_words") or [],
+                "forward_tag": source_info.get("forward_tag", False),
             }
             failed        = []
             succeeded     = []
@@ -523,6 +561,13 @@ async def process_buffered_messages(source_chat_id, source_client=None):
                     logger.info(f"All messages blacklisted for user {user_id}")
                     continue
 
+            # ✅ NEW: Custom Filters — content-type ke hisaab se allow/block
+            content_filters = await database.get_content_filters(user_id) if user_id else database.DEFAULT_CONTENT_FILTERS
+            messages_to_send = [msg for msg in messages_to_send if _content_type_allowed(msg, content_filters)]
+            if not messages_to_send:
+                logger.info(f"All messages blocked by content-type filter for user {user_id}")
+                continue
+
             msg_delay        = await database.get_delay(user_id) if user_id else MSG_DELAY
             endtext          = await database.get_endtext(user_id) if user_id else None
             caption_template = await database.get_caption_template(user_id) if user_id else None
@@ -544,6 +589,7 @@ async def process_buffered_messages(source_chat_id, source_client=None):
                 "caption_template": caption_template or "",
                 "replace_rules": replace_rules,
                 "remove_words": remove_words,
+                "forward_tag": content_filters.get("forward_tag", False),
             }
 
             await message_queue.put((messages_to_send.copy(), targets, "buffered", 0, sender, source_info))

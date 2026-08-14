@@ -206,6 +206,33 @@ async def get_blacklist(user_id: int) -> list:
 async def clear_blacklist(user_id: int):
     await _update_settings(user_id, {"blacklist": []})
 
+# ── Custom Content-Type Filters (Forward tag / Text / Doc / Video / Photo / Audio / Sticker) ──
+DEFAULT_CONTENT_FILTERS = {
+    "forward_tag": False,   # False = copy (no "Forwarded From" tag) — current default behavior
+    "text": True,
+    "document": True,
+    "video": True,
+    "photo": True,
+    "audio": True,
+    "sticker": True,
+}
+
+async def get_content_filters(user_id: int) -> dict:
+    doc = await _get_settings(user_id)
+    cf = doc.get("content_filters", {})
+    merged = DEFAULT_CONTENT_FILTERS.copy()
+    merged.update(cf)
+    return merged
+
+async def toggle_content_filter(user_id: int, key: str) -> bool:
+    """Toggle karo aur naya (updated) value return karo."""
+    if key not in DEFAULT_CONTENT_FILTERS:
+        raise ValueError(f"Unknown content filter key: {key}")
+    cf = await get_content_filters(user_id)
+    cf[key] = not cf[key]
+    await _update_settings(user_id, {"content_filters": cf})
+    return cf[key]
+
 # ── End Text (Footer) ──
 async def set_endtext(user_id: int, text: str):
     await _update_settings(user_id, {"endtext": text})
@@ -329,7 +356,8 @@ async def reset_all_settings(user_id: int):
         {"user_id": user_id},
         {
             "$unset": {"caption_template": "", "endtext": ""},
-            "$set": {"filters": [], "replacements": [], "remove_words": [], "blacklist": []},
+            "$set": {"filters": [], "replacements": [], "remove_words": [], "blacklist": [],
+                      "content_filters": DEFAULT_CONTENT_FILTERS.copy()},
         },
         upsert=True,
     )
