@@ -1294,7 +1294,7 @@ async def login_step_handler(client, message: Message):
 
 settings_states: dict[int, dict] = {}   # user_id -> {"action": ..., "back": ...}
 
-MENU_HEADER = "🖐 <b>Select an option below to manage:</b>"
+MENU_HEADER = "<u><b><blockquote>⚙️ ᴍᴀɴᴀɢᴇ ᴄʜᴀɴɴᴇʟ sᴇᴛᴛɪɴɢs\n\n👇🏼 sᴇʟᴇᴄᴛ ᴀɴ ᴏᴘᴛɪᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ᴍᴀɴᴀɢᴇ:</b></blockquote></u>" 
 
 # ✅ NEW: button labels ko sᴍᴀʟʟ ᴄᴀᴘꜱ unicode style mein dikhane ke liye —
 # sirf English letters convert hote hain, emoji/space/symbols waise hi rehte hain.
